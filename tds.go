@@ -1171,7 +1171,6 @@ initiate_connection:
 		}
 	}
 
-	// call krb relates setup methods and assign to p.kerberos
 	krbParams, err := getKrbParams(p.Kerberos)
 	if err != nil {
 		return nil, err

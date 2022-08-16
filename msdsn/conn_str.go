@@ -115,7 +115,7 @@ var skipSetup = errors.New("skip setting up TLS")
 
 func Parse(dsn string) (Config, map[string]string, error) {
 	p := Config{}
-	p.Kerberos = make(map[string]interface{})
+	p.Kerberos = map[string]interface{}{"Realm": ""}
 
 	var params map[string]string
 	if strings.HasPrefix(dsn, "odbc:") {

@@ -22,22 +22,23 @@ func getAuthN(user, password, serverSPN, workstation string, Kerberos map[string
 }
 
 func getKrbParams(krb map[string]interface{}) (krbParams map[string]interface{}, err error) {
-	krbParams = make(map[string]interface{})
-	krbParams["Config"], err = setupKerbConfig(krb["Krb5ConfFile"].(string))
-	if err != nil {
-		return nil, err
-	}
+	if _, ok := krb["Krb5ConfFile"]; ok {
+		krbParams = make(map[string]interface{})
+		krbParams["Config"], err = setupKerbConfig(krb["Krb5ConfFile"].(string))
+		if err != nil {
+			return nil, err
+		}
 
-	krbParams["Keytab"], err = setupKerbKeytab(krb["KeytabFile"].(string))
-	if err != nil {
-		return nil, err
-	}
+		krbParams["Keytab"], err = setupKerbKeytab(krb["KeytabFile"].(string))
+		if err != nil {
+			return nil, err
+		}
 
-	krbParams["Cache"], err = setupKerbCache(krb["KrbCache"].(string))
-	if err != nil {
-		return nil, err
+		krbParams["Cache"], err = setupKerbCache(krb["KrbCache"].(string))
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	return krbParams, nil
 }
 
