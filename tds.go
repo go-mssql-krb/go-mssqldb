@@ -1171,7 +1171,9 @@ initiate_connection:
 		}
 	}
 
-	auth, authOk := getAuthN(p)
+	// call krb relates setup methods and assign to p.kerberos
+
+	auth, authOk := getAuthN(p.User, p.Password, p.ServerSPN, p.Workstation, p.Kerberos)
 
 	if authOk {
 		defer auth.Free()

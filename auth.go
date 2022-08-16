@@ -3,13 +3,17 @@
 
 package mssql
 
-import "github.com/microsoft/go-mssqldb/msdsn"
+import (
+	"github.com/jcmturner/gokrb5/v8/config"
+	"github.com/jcmturner/gokrb5/v8/credentials"
+	"github.com/jcmturner/gokrb5/v8/keytab"
+)
 
-func getAuthN(p msdsn.Config) (auth auth, authOk bool) {
-	if p.Kerberos != nil && p.Kerberos.Config != nil {
-		auth, authOk = getKRB5Auth(p.User, p.ServerSPN, p.Kerberos.Config, p.Kerberos.Keytab, p.Kerberos.Cache)
+func getAuthN(user, password, serverSPN, workstation string, Kerberos map[string]interface{}) (auth auth, authOk bool) {
+	if Kerberos != nil && Kerberos["Config"] != nil {
+		auth, authOk = getKRB5Auth(user, serverSPN, Kerberos["Config"].(*config.Config), Kerberos["Keytab"].(*keytab.Keytab), Kerberos["Cache"].(*credentials.CCache))
 	} else {
-		auth, authOk = getAuth(p.User, p.Password, p.ServerSPN, p.Workstation)
+		auth, authOk = getAuth(user, password, serverSPN, workstation)
 	}
 	return
 }
