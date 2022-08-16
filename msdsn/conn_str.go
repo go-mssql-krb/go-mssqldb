@@ -13,10 +13,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/jcmturner/gokrb5/v8/config"
-	"github.com/jcmturner/gokrb5/v8/credentials"
-	"github.com/jcmturner/gokrb5/v8/keytab"
 )
 
 const defaultServerPort = 1433
@@ -382,38 +378,6 @@ func resolveServerPort(port uint64) uint64 {
 		return defaultServerPort
 	}
 	return port
-}
-
-func setupKerbConfig(krb5configPath string) (*config.Config, error) {
-	krb5CnfFile, err := os.Open(krb5configPath)
-	if err != nil {
-		return nil, err
-	}
-	c, err := config.NewFromReader(krb5CnfFile)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
-}
-
-func setupKerbCache(kerbCCahePath string) (*credentials.CCache, error) {
-	cache, err := credentials.LoadCCache(kerbCCahePath)
-	if err != nil {
-		return nil, err
-	}
-	return cache, nil
-}
-
-func setupKerbKeytab(keytabFilePath string) (*keytab.Keytab, error) {
-	var kt = &keytab.Keytab{}
-	keytabConf, err := ioutil.ReadFile(keytabFilePath)
-	if err != nil {
-		return nil, err
-	}
-	if err = kt.Unmarshal([]byte(keytabConf)); err != nil {
-		return nil, err
-	}
-	return kt, nil
 }
 
 // convert connectionParams to url style connection string
