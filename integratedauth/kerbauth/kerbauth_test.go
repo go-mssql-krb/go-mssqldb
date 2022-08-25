@@ -1,7 +1,7 @@
 //go:build !windows && go1.13
 // +build !windows,go1.13
 
-package mssql
+package kerbauth
 
 import (
 	"reflect"

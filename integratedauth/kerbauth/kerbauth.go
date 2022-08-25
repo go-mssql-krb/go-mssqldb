@@ -1,10 +1,12 @@
 //go:build !windows && go1.13
 // +build !windows,go1.13
 
-package mssql
+package kerbauth
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/jcmturner/gokrb5/v8/credentials"
 	"github.com/jcmturner/gokrb5/v8/keytab"
 	"github.com/jcmturner/gokrb5/v8/spnego"
+	"github.com/microsoft/go-mssqldb/integratedauth"
+	"github.com/microsoft/go-mssqldb/msdsn"
 )
 
 // Kerberos Client State
@@ -20,6 +24,7 @@ type krb5ClientState int
 
 type krb5Auth struct {
 	username   string
+	password   string
 	realm      string
 	serverSPN  string
 	port       uint64
@@ -52,12 +57,28 @@ const (
 	initiatorReady
 )
 
-func getKRB5Auth(user, serverSPN string, krb5Conf *config.Config, keytabContent *keytab.Keytab, cacheContent *credentials.CCache) (auth, bool) {
+var (
+	_                integratedauth.IntegratedAuthenticator = (*krb5Auth)(nil)
+	AuthProviderFunc integratedauth.Provider                = integratedauth.ProviderFunc(getAuth)
+)
+
+func init() {
+	err := integratedauth.SetIntegratedAuthenticationProvider("kerbauth", AuthProviderFunc)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func getAuth(config msdsn.Config) (integratedauth.IntegratedAuthenticator, bool) {
 	var port uint64
 	var realm, serviceStr string
 	var err error
 
-	params1 := strings.Split(serverSPN, ":")
+	krb, err := readKrb5Config(config)
+	if err != nil {
+		return &krb5Auth{}, false
+	}
+	params1 := strings.Split(config.Parameters["ServerSPN"], ":")
 	if len(params1) != 2 {
 		return nil, false
 	}
@@ -78,7 +99,7 @@ func getKRB5Auth(user, serverSPN string, krb5Conf *config.Config, keytabContent 
 		return nil, false
 	}
 
-	params3 := strings.Split(serverSPN, "@")
+	params3 := strings.Split(config.Parameters["ServerSPN"], "@")
 	switch len(params3) {
 	case 1:
 		serviceStr = params3[0]
@@ -93,13 +114,13 @@ func getKRB5Auth(user, serverSPN string, krb5Conf *config.Config, keytabContent 
 	}
 
 	return &krb5Auth{
-		username:   user,
+		username:   config.Parameters["User"],
 		serverSPN:  serviceStr,
 		port:       port,
 		realm:      realm,
-		krb5Config: krb5Conf,
-		krbKeytab:  keytabContent,
-		krbCache:   cacheContent,
+		krb5Config: krb.Config,
+		krbKeytab:  krb.Keytab,
+		krbCache:   krb.Cache,
 	}, true
 }
 
@@ -107,7 +128,9 @@ func (auth *krb5Auth) InitialBytes() ([]byte, error) {
 	var cl *client.Client
 	var err error
 	// Init keytab from conf
-	if auth.krbKeytab != nil {
+	if auth.username != "" && auth.password != "" {
+		cl = client.NewWithPassword(auth.username, auth.realm, auth.password, auth.krb5Config)
+	} else if auth.krbKeytab != nil {
 		// Init krb5 client and login
 		cl = client.NewWithKeytab(auth.username, auth.realm, auth.krbKeytab, auth.krb5Config, client.DisablePAFXFAST(true))
 	} else {
@@ -148,4 +171,90 @@ func (auth *krb5Auth) NextBytes(token []byte) ([]byte, error) {
 	}
 	auth.state = initiatorReady
 	return []byte{}, nil
+}
+
+func readKrb5Config(config msdsn.Config) (Kerberos, error) {
+	krb := Kerberos{}
+	var err error
+	
+	krbConfig, ok := config.Parameters["krb5conffile"]
+	if !ok {
+		return krb, fmt.Errorf("krb5 config file is required")
+	}
+
+	krb.Config, err = setupKerbConfig(krbConfig)
+	if err != nil {
+		return krb, err
+	}
+
+	missingParam := validateKerbConfig(config.Parameters)
+	if missingParam != "" {
+		return krb, fmt.Errorf("missing parameter:%s", missingParam)
+	}
+
+	if realm, ok := config.Parameters["realm"]; ok {
+		krb.Realm = realm
+	}
+
+	if krbCache, ok := config.Parameters["krbcache"]; ok {
+		krb.Cache, err = setupKerbCache(krbCache)
+		if err != nil {
+			return krb, err
+		}
+	}
+
+	if keytabfile, ok := config.Parameters["keytabfile"]; ok {
+		krb.Keytab, err = setupKerbKeytab(keytabfile)
+		if err != nil {
+			return krb, err
+		}
+	}
+
+	return krb, nil
+}
+
+func validateKerbConfig(c map[string]string) (missingParam string) {
+	if c["keytabfile"] != "" {
+		if c["realm"] == "" {
+			missingParam = "realm"
+			return
+		}
+	}
+	if c["krbcache"] == "" && c["keytabfile"] == "" {
+		missingParam = "atleast krbcache or keytab is required"
+		return
+	}
+	return
+}
+
+func setupKerbConfig(krb5configPath string) (*config.Config, error) {
+	krb5CnfFile, err := os.Open(krb5configPath)
+	if err != nil {
+		return nil, err
+	}
+	c, err := config.NewFromReader(krb5CnfFile)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func setupKerbCache(kerbCCahePath string) (*credentials.CCache, error) {
+	cache, err := credentials.LoadCCache(kerbCCahePath)
+	if err != nil {
+		return nil, err
+	}
+	return cache, nil
+}
+
+func setupKerbKeytab(keytabFilePath string) (*keytab.Keytab, error) {
+	var kt = &keytab.Keytab{}
+	keytabConf, err := ioutil.ReadFile(keytabFilePath)
+	if err != nil {
+		return nil, err
+	}
+	if err = kt.Unmarshal([]byte(keytabConf)); err != nil {
+		return nil, err
+	}
+	return kt, nil
 }
