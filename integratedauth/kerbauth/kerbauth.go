@@ -4,6 +4,7 @@
 package kerbauth
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -17,6 +18,12 @@ import (
 	"github.com/jcmturner/gokrb5/v8/spnego"
 	"github.com/microsoft/go-mssqldb/integratedauth"
 	"github.com/microsoft/go-mssqldb/msdsn"
+)
+
+var (
+	SetKrbConfig = setupKerbConfig
+	SetKrbKeytab = setupKerbKeytab
+	SetKrbCache  = setupKerbCache
 )
 
 // Kerberos Client State
@@ -69,18 +76,18 @@ func init() {
 	}
 }
 
-func getAuth(config msdsn.Config) (integratedauth.IntegratedAuthenticator, bool) {
+func getAuth(config msdsn.Config) (integratedauth.IntegratedAuthenticator, error) {
 	var port uint64
 	var realm, serviceStr string
 	var err error
 
 	krb, err := readKrb5Config(config)
 	if err != nil {
-		return &krb5Auth{}, false
+		return &krb5Auth{}, err
 	}
-	params1 := strings.Split(config.Parameters["ServerSPN"], ":")
+	params1 := strings.Split(config.ServerSPN, ":")
 	if len(params1) != 2 {
-		return nil, false
+		return nil, errors.New("invalid ServerSPN")
 	}
 
 	params2 := strings.Split(params1[1], "@")
@@ -88,18 +95,18 @@ func getAuth(config msdsn.Config) (integratedauth.IntegratedAuthenticator, bool)
 	case 1:
 		port, err = strconv.ParseUint(params1[1], 10, 16)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
 	case 2:
 		port, err = strconv.ParseUint(params2[0], 10, 16)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
 	default:
-		return nil, false
+		return nil, errors.New("invalid ServerSPN")
 	}
 
-	params3 := strings.Split(config.Parameters["ServerSPN"], "@")
+	params3 := strings.Split(config.ServerSPN, "@")
 	switch len(params3) {
 	case 1:
 		serviceStr = params3[0]
@@ -110,18 +117,19 @@ func getAuth(config msdsn.Config) (integratedauth.IntegratedAuthenticator, bool)
 		realm = params3[1]
 		serviceStr = params3[0]
 	default:
-		return nil, false
+		return nil, errors.New("invalid ServerSPN")
 	}
 
 	return &krb5Auth{
-		username:   config.Parameters["User"],
+		username:   config.User,
+		password:   config.Password,
 		serverSPN:  serviceStr,
 		port:       port,
 		realm:      realm,
 		krb5Config: krb.Config,
 		krbKeytab:  krb.Keytab,
 		krbCache:   krb.Cache,
-	}, true
+	}, nil
 }
 
 func (auth *krb5Auth) InitialBytes() ([]byte, error) {
@@ -176,13 +184,13 @@ func (auth *krb5Auth) NextBytes(token []byte) ([]byte, error) {
 func readKrb5Config(config msdsn.Config) (Kerberos, error) {
 	krb := Kerberos{}
 	var err error
-	
+
 	krbConfig, ok := config.Parameters["krb5conffile"]
 	if !ok {
 		return krb, fmt.Errorf("krb5 config file is required")
 	}
 
-	krb.Config, err = setupKerbConfig(krbConfig)
+	krb.Config, err = SetKrbConfig(krbConfig)
 	if err != nil {
 		return krb, err
 	}
@@ -197,14 +205,14 @@ func readKrb5Config(config msdsn.Config) (Kerberos, error) {
 	}
 
 	if krbCache, ok := config.Parameters["krbcache"]; ok {
-		krb.Cache, err = setupKerbCache(krbCache)
+		krb.Cache, err = SetKrbCache(krbCache)
 		if err != nil {
 			return krb, err
 		}
 	}
 
 	if keytabfile, ok := config.Parameters["keytabfile"]; ok {
-		krb.Keytab, err = setupKerbKeytab(keytabfile)
+		krb.Keytab, err = SetKrbKeytab(keytabfile)
 		if err != nil {
 			return krb, err
 		}
